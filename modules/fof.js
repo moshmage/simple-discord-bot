@@ -8,8 +8,9 @@ export class FoF {
     this.#client = client;
   }
 
-  Timers = {};
+  Reminders = {};
   FoFVotes = {};
+  Timers = {};
 
   commandData = new SlashCommandBuilder()
     .setName(`fof`)
@@ -21,6 +22,12 @@ export class FoF {
         .setName(`channel`)
         .setDescription(`Choose channel to start FoF`)
         .setRequired(true)))
+    .addSubcommand(s => s
+      .setName(`stop`)
+      .setDescription(`Stop fof on chosen channel`)
+      .addChannelOption(o => o
+        .setName(`channel`)
+        .setDescription(`Choose channel to stop FoF`)))
     .addSubcommand(s => s
       .setName(`repeat`)
       .setDescription(`Configure repeat options for channel`)
@@ -87,29 +94,38 @@ export class FoF {
   async startFofVote(channel) {
     await this.sendRowsToChannel(channel.id);
     this.FoFVotes[channel.id] = {startedAt: new Date()};
-    setTimeout(() => {
-      this.sendVoteCountToChannel(channel.id);
-      this.startFofVote(channel);
-    }, 24 * 60 * 60 * 1000) // 24hours
+    this.Timers[channel.id] =
+      setTimeout(() => {
+        this.sendVoteCountToChannel(channel.id);
+        this.startFofVote(channel);
+      }, 24 * 60 * 60 * 1000) // 24hours
+  }
+
+  async stopFofVote(channel) {
+    await this.sendVoteCountToChannel(channel);
+    await this.#client.channels.cache.get(channel).send({content: `FoF: Voting was turned off`});
+    clearTimeout(this.Timers[channel]);
+    this.Timers[channel] = null;
+    this.FoFVotes[channel] = {};
   }
 
   async configSayReminder(interaction, channel) {
 
     const sayReminder = (channelId, minutes) => {
-      this.Timers[channelId] =
+      this.Reminders[channelId] =
         setTimeout(async () => {
           await this.sendRowsToChannel(channelId);
-          if (this.Timers[channelId])
+          if (this.Reminders[channelId])
             sayReminder(channelId, minutes);
         }, minutes * 60 * 1000)
     }
 
     const setTimerOff = (channelId) => {
-      clearTimeout(this.Timers[channelId]);
-      this.Timers[channelId] = null;
+      clearTimeout(this.Reminders[channelId]);
+      this.Reminders[channelId] = null;
     }
 
-    if (interaction.options.getBoolean(`off`) && this.Timers[channel.id]) {
+    if (interaction.options.getBoolean(`off`) && this.Reminders[channel.id]) {
       setTimerOff(channel.id);
       interaction.reply(`Turned off repeating message for ${channel.name}`);
     } else if (interaction.options.getNumber(`minutes`)) {
@@ -119,7 +135,7 @@ export class FoF {
     }
   }
 
-  onInteractionCreate(interaction) {
+  async onInteractionCreate(interaction) {
     if (interaction.isCommand())
       return this.onCommandInteraction(interaction);
     else if (interaction.isButton())
@@ -134,6 +150,9 @@ export class FoF {
 
       if (!this.FoFVotes[interaction.channel.id])
         this.FoFVotes[interaction.channel.id] = {};
+
+      if (!this.FoFVotes[interaction.channel.id].startedAt)
+        return interaction.reply({content: `Fof is not enabled for this channel`});
 
       if (this.FoFVotes[interaction.channel.id][interaction.member.id] !== undefined)
         await interaction.reply({content: `Your vote was changed, still secret`, ephemeral: true});
@@ -154,12 +173,23 @@ export class FoF {
       return this.configSayReminder(interaction, channel)
 
     if (interaction.options.getSubcommand() === `start`) {
-      await interaction.reply({content: `Will post on ${channel.name}`});
+      if (this.FoFVotes[channel.id].startedAt)
+        return interaction.reply({content: `FoF already enabled on the chosen channel`, ephemeral: true})
+
+      await interaction.reply({content: `Will post on ${channel.name}`, ephemeral: true});
       await this.startFofVote(channel);
     }
 
     if (interaction.options.getSubcommand() === `count`)
-      await interaction.reply({content: this.votesCountMessage(channel?.id || interaction.channel.id)});
+      await interaction.reply({content: this.votesCountMessage(interaction.channel.id)});
+
+    if (interaction.options.getSubcommand() === `stop`) {
+      if (!this.FoFVotes[channel?.id || interaction.channel.id].startedAt)
+        return interaction.reply({content: `Nothing to stop`, ephemeral: true});
+
+      await this.stopFofVote(channel?.id || interaction.channel.id);
+    }
+
     
   }
 }
