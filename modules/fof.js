@@ -159,7 +159,7 @@ export class FoF {
       else
         await interaction.reply({content: `Your vote is secret, but it was saved`, ephemeral: true});
 
-      this.FoFVotes[interaction.channel.id][interaction.member.id] = value;
+      this.FoFVotes[interaction.channel.id][interaction.member.id] = +value;
     } else await interaction.reply({content: `Missing argument?`, ephemeral: true});
   }
   
