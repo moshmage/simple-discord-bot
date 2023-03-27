@@ -151,7 +151,7 @@ export class FoF {
       if (!this.FoFVotes[interaction.channel.id])
         this.FoFVotes[interaction.channel.id] = {};
 
-      if (!this.FoFVotes[interaction.channel.id].startedAt)
+      if (!this.FoFVotes[interaction.channel.id]?.startedAt)
         return interaction.reply({content: `Fof is not enabled for this channel`});
 
       if (this.FoFVotes[interaction.channel.id][interaction.member.id] !== undefined)
@@ -173,7 +173,7 @@ export class FoF {
       return this.configSayReminder(interaction, channel)
 
     if (interaction.options.getSubcommand() === `start`) {
-      if (this.FoFVotes[channel.id].startedAt)
+      if (this.FoFVotes[channel.id]?.startedAt)
         return interaction.reply({content: `FoF already enabled on the chosen channel`, ephemeral: true})
 
       await interaction.reply({content: `Will post on ${channel.name}`, ephemeral: true});
@@ -184,7 +184,7 @@ export class FoF {
       await interaction.reply({content: this.votesCountMessage(interaction.channel.id)});
 
     if (interaction.options.getSubcommand() === `stop`) {
-      if (!this.FoFVotes[channel?.id || interaction.channel.id].startedAt)
+      if (!this.FoFVotes[channel?.id || interaction.channel.id]?.startedAt)
         return interaction.reply({content: `Nothing to stop`, ephemeral: true});
 
       await this.stopFofVote(channel?.id || interaction.channel.id);
