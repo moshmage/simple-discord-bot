@@ -188,6 +188,7 @@ export class FoF {
         return interaction.reply({content: `Nothing to stop`, ephemeral: true});
 
       await this.stopFofVote(channel?.id || interaction.channel.id);
+      await interaction.reply({content: `Ok`, ephemeral: true});
     }
 
     
