@@ -66,10 +66,10 @@ export class FoF {
     if (!this.FoFVotes[channelId])
       return {votes: 0, total: 0};
 
-    const values = Object.values(this.FoFVotes[channelId]).filter(v => typeof v !== "number")
+    const values = Object.values(this.FoFVotes[channelId]).filter(v => typeof v === "number")
     const total = values.length;
 
-    return {votes: values.reduce((p, c, i, all) => p + c, 0) / total, total};
+    return {votes: values.reduce((p, c) => +p + +c, 0) / total, total};
   }
 
   votesCountMessage(channelId) {
