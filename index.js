@@ -39,4 +39,10 @@ client.on(Events.InteractionCreate, async interaction => {
   });
 });
 
-client.login(BOT_TOKEN);
+(() => {
+  return client.login(BOT_TOKEN);
+})()
+  .catch((e)=> {
+    console.error(`Error`, e);
+  });
+

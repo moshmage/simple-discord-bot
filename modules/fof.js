@@ -1,196 +1,207 @@
-import {ActionRowBuilder, ButtonBuilder, ButtonStyle, SlashCommandBuilder} from "discord.js";
+import {ChannelRows, ChannelTimers, ChannelVotes, DailyChannelResults, RepeaterTimers} from "./fof/memory-base.js";
+import VoteRows from "./fof/vote-rows.js";
+import {
+  AlreadyEnabledForChosenChannel,
+  AveragesToOutOf,
+  AveragesToOutOfDays, HowConfident,
+  MissingArgument,
+  NothingToStop,
+  NoVotesOnWeekend,
+  RepeatingMessageDisabled,
+  RepeatingMessageEvery,
+  VoteSaved,
+  VotingDisabled,
+  WillPostOn,
+  WrongArgument
+} from "./fof/messages.js";
+import {isWeekend} from "date-fns";
+import command from "./fof/command.js";
 
 export class FoF {
-  name = "Fist of Five";
-  #client;
+  name = `Fist of Five`;
+
+  /**
+   * @type {import('discord.js').Client}
+   */
+  client;
+  commandData = command;
 
   constructor(client) {
-    this.#client = client;
+    this.client = client;
   }
 
-  Reminders = {};
-  FoFVotes = {};
-  Timers = {};
-
-  commandData = new SlashCommandBuilder()
-    .setName(`fof`)
-    .setDescription(`Fist of Five`)
-    .addSubcommand(s => s
-      .setName(`start`)
-      .setDescription(`Start FoF on chosen channel`)
-      .addChannelOption(o => o
-        .setName(`channel`)
-        .setDescription(`Choose channel to start FoF`)
-        .setRequired(true)))
-    .addSubcommand(s => s
-      .setName(`stop`)
-      .setDescription(`Stop fof on chosen channel`)
-      .addChannelOption(o => o
-        .setName(`channel`)
-        .setDescription(`Choose channel to stop FoF`)))
-    .addSubcommand(s => s
-      .setName(`repeat`)
-      .setDescription(`Configure repeat options for channel`)
-      .addChannelOption(o => o
-        .setName(`channel`)
-        .setDescription(`On what channel`)
-        .setRequired(true))
-      .addNumberOption(o => o
-        .setName(`minutes`)
-        .setDescription(`Choose amount of minutes to wait before showing results and restarting`))
-      .addBooleanOption(o => o
-        .setName(`off`)
-        .setDescription(`turn off repeat, aka never-ending-post-once`)))
-    .addSubcommand(s => s
-      .setName(`count`)
-      .setDescription(`See current average and total confidence votes for current channel`));
-
-  #voteButtonRows = [
-    new ActionRowBuilder()
-      .addComponents(
-        new ButtonBuilder()
-          .setCustomId(`vote:0`)
-          .setLabel(`None. Nill. Zero.`)
-          .setStyle(ButtonStyle.Secondary)),
-    new ActionRowBuilder()
-      .addComponents(
-        [1, 2, 3, 4, 5]
-          .map(n =>
-            new ButtonBuilder()
-              .setCustomId(`vote:${n}`)
-              .setLabel(n.toString())
-              .setStyle(ButtonStyle.Secondary)))
-  ]
-
-  countVotes(channelId) {
-    if (!this.FoFVotes[channelId])
-      return {votes: 0, total: 0};
-
-    const values = Object.values(this.FoFVotes[channelId]).filter(v => typeof v === "number")
-    const total = values.length;
-
-    return {votes: values.reduce((p, c) => +p + +c, 0) / total, total};
+  /**
+   * @param {number[]} values
+   * @return {{average: number, values: number[], total: number}}
+   */
+  count(values = []) {
+    return {average: values.reduce((p, c) => p + c, 0) / values.length, values, total: values.length}
   }
 
-  votesCountMessage(channelId) {
-    const {votes, total} = this.countVotes(channelId);
-    return `Overall confidence averages to ${votes} out of ${total} votes`;
+  async sendRowsToChannel(channel) {
+    if (ChannelRows[channel.id])
+      await ChannelRows[channel.id].delete();
+
+    ChannelRows[channel.id] =
+      await this.client.channels.cache.get(channel.id).send({content: HowConfident, components: VoteRows})
   }
 
-  sendVoteCountToChannel(channelId) {
-    return this.#client.channels.cache.get(channelId).send({content: this.votesCountMessage(channelId)});
+  async sendVoteCountToChannel(channel) {
+    const {average, total} = this.count(Object.values(ChannelVotes[channel.id]))
+    return this.client.channels.cache.get(channel.id).send({content: AveragesToOutOf(average, total)});
   }
 
-  async sendRowsToChannel(channelId) {
-    return this.#client
-      .channels.cache
-      .get(channelId)
-      .send({
-        content: `Fist of Five; How confident are you on the current sprint today?`,
-        components: this.#voteButtonRows
-      })
-  }
+  async repeatLogic(interaction, channel) {
 
-  async startFofVote(channel) {
-    await this.sendRowsToChannel(channel.id);
-    this.FoFVotes[channel.id] = {startedAt: new Date()};
-    this.Timers[channel.id] =
-      setTimeout(() => {
-        this.sendVoteCountToChannel(channel.id);
-        this.startFofVote(channel);
-      }, 24 * 60 * 60 * 1000) // 24hours
-  }
-
-  async stopFofVote(channel) {
-    await this.sendVoteCountToChannel(channel);
-    await this.#client.channels.cache.get(channel).send({content: `FoF: Voting was turned off`});
-    clearTimeout(this.Timers[channel]);
-    this.Timers[channel] = null;
-    this.FoFVotes[channel] = {};
-  }
-
-  async configSayReminder(interaction, channel) {
-
-    const sayReminder = (channelId, minutes) => {
-      this.Reminders[channelId] =
+    const _startRepeatTimer = (minutes) =>
+      RepeaterTimers[channel.id] =
         setTimeout(async () => {
-          await this.sendRowsToChannel(channelId);
-          if (this.Reminders[channelId])
-            sayReminder(channelId, minutes);
-        }, minutes * 60 * 1000)
+          await this.sendRowsToChannel(channel);
+          if (RepeaterTimers[channel.id])
+            _startRepeatTimer();
+        }, minutes * 60 * 1000);
+
+    const _stopRepeatTimer = () => {
+      clearTimeout(RepeaterTimers[channel.id]);
+      RepeaterTimers[channel.id] = null;
     }
 
-    const setTimerOff = (channelId) => {
-      clearTimeout(this.Reminders[channelId]);
-      this.Reminders[channelId] = null;
-    }
-
-    if (interaction.options.getBoolean(`off`) && this.Reminders[channel.id]) {
-      setTimerOff(channel.id);
-      interaction.reply(`Turned off repeating message for ${channel.name}`);
+    if (interaction.options.getBoolean(`off`) && ChannelTimers[channel.id]) {
+      _stopRepeatTimer();
+      return interaction.reply({content: RepeatingMessageDisabled(channel.name)})
     } else if (interaction.options.getNumber(`minutes`)) {
       const minutes = interaction.options.getNumber(`minutes`);
-      sayReminder(channel.id, minutes);
-      interaction.reply(`Set repeating message every ${minutes}min`);
+      _startRepeatTimer(minutes);
+      return interaction.reply({content: RepeatingMessageEvery(minutes)})
     }
+
+    return interaction.reply({content: WrongArgument, ephemeral: true});
   }
 
+  async startLogic(channel) {
+
+    const _startLogic = async (repeating = false, _wasCalledOnWeekend = false) => {
+      if (!_wasCalledOnWeekend) {
+        if (repeating)
+          await this.sendVoteCountToChannel(channel);
+        await this.sendRowsToChannel(channel);
+
+        DailyChannelResults[channel.id] = {
+          ... (DailyChannelResults[channel.id] || {}),
+          [new Date().toISOString()]: this.count(Object.values(ChannelVotes[channel.id]))
+        }
+
+        ChannelVotes[channel.id] = {};
+      }
+
+      return _startLogic(true, isWeekend(new Date()));
+    }
+
+    if (!ChannelTimers[channel.id])
+      _startLogic(false, isWeekend(new Date()));
+
+    ChannelTimers[channel.id] =
+      setTimeout(() => {
+        _startLogic(true, isWeekend(new Date()))
+      }, 24 * 60 * 60 * 1000);
+  }
+
+  async stopLogic(channel) {
+    await this.sendVoteCountToChannel(channel);
+
+    clearTimeout(ChannelTimers[channel.id]);
+
+    ChannelTimers[channel.id] = null;
+    ChannelVotes[channel.id] = {};
+    ChannelRows[channel.id]?.delete();
+    ChannelRows[channel.id] = null;
+  }
+
+  async stopCommand(interaction, channel) {
+    if (!ChannelTimers[channel?.id || interaction.channel.id])
+      return interaction.reply({content: NothingToStop, ephemeral: true});
+
+    await this.stopLogic(channel);
+
+    return interaction.reply({content: VotingDisabled});
+  }
+
+  async startCommand(interaction, channel) {
+    if (ChannelTimers[channel.id])
+      return interaction.reply({content: AlreadyEnabledForChosenChannel});
+
+    await interaction.reply({content: WillPostOn(channel.name), ephemeral: true});
+    await this.startLogic(channel);
+  }
+
+  async voteCommand(interaction) {
+    if (isWeekend(new Date()))
+      return interaction.reply({content: NoVotesOnWeekend, ephemeral: true});
+
+    if (!interaction.customId)
+      return interaction.reply({content: MissingArgument, ephemeral: true});
+
+    const [command, value] = interaction.customId.split(':');
+
+    if (command !== `vote`)
+      return interaction.reply({content: WrongArgument, ephemeral: true});
+
+    ChannelVotes[interaction.channel.id] = {
+      ...(ChannelVotes[interaction.channel.id] || {}),
+      [interaction.member.id]: +value
+    };
+
+    return interaction.reply({content: VoteSaved, ephemeral: true})
+  }
+
+  async countCommand(interaction) {
+    let days = interaction.options.getNumber(`days`);
+    days = days === null && 1 || days;
+
+    if (days === 1) {
+      const {average, total} = this.count(Object.values(ChannelVotes[interaction.channel.id]));
+      return interaction.reply({content: AveragesToOutOf(average, total), ephemeral: true});
+    }
+
+    const {average, total} =
+      this.count(Object.values(DailyChannelResults[interaction.channel.id]).slice(-days).map(({values}) => values).flat());
+    return interaction.reply({content: AveragesToOutOfDays(average, total, days)})
+  }
+
+  async repeatCommand(interaction, channel) {
+    return this.repeatLogic(interaction, channel || interaction.channel);
+  }
+
+  async onCommandInteraction(interaction) {
+    if (interaction.commandName !== `fof`)
+      return;
+
+    const channel = interaction.options.getChannel(`channel`);
+
+    if (interaction.options.getSubcommand() === "repeat")
+      return this.repeatCommand(interaction, channel)
+
+    if (interaction.options.getSubcommand() === `start`) {
+      return this.startCommand(interaction, channel)
+    }
+
+    if (interaction.options.getSubcommand() === `count`)
+      return this.countCommand(interaction);
+
+    if (interaction.options.getSubcommand() === `stop`)
+      return this.stopCommand(interaction);
+
+    return interaction.reply({content: WrongArgument});
+  }
+
+  /**
+   * @param {import('discord.js').Interaction} interaction
+   * @return {Promise<*|undefined>}
+   */
   async onInteractionCreate(interaction) {
     if (interaction.isCommand())
       return this.onCommandInteraction(interaction);
     else if (interaction.isButton())
-      return this.onButtonInteraction(interaction);
-  }
-
-  async onButtonInteraction(interaction) {
-    if (interaction.customId) {
-      const [command, value] = interaction.customId.split(':');
-      if (command !== `vote`)
-        return;
-
-      if (!this.FoFVotes[interaction.channel.id])
-        this.FoFVotes[interaction.channel.id] = {};
-
-      if (!this.FoFVotes[interaction.channel.id]?.startedAt)
-        return interaction.reply({content: `Fof is not enabled for this channel`});
-
-      if (this.FoFVotes[interaction.channel.id][interaction.member.id] !== undefined)
-        await interaction.reply({content: `Your vote was changed, still secret`, ephemeral: true});
-      else
-        await interaction.reply({content: `Your vote is secret, but it was saved`, ephemeral: true});
-
-      this.FoFVotes[interaction.channel.id][interaction.member.id] = +value;
-    } else await interaction.reply({content: `Missing argument?`, ephemeral: true});
-  }
-  
-  async onCommandInteraction(interaction) {
-    if (interaction.commandName !== `fof`)
-      return;
-    
-    const channel = interaction.options.getChannel(`channel`);
-
-    if (interaction.options.getSubcommand() === "repeat")
-      return this.configSayReminder(interaction, channel)
-
-    if (interaction.options.getSubcommand() === `start`) {
-      if (this.FoFVotes[channel.id]?.startedAt)
-        return interaction.reply({content: `FoF already enabled on the chosen channel`, ephemeral: true})
-
-      await interaction.reply({content: `Will post on ${channel.name}`, ephemeral: true});
-      await this.startFofVote(channel);
-    }
-
-    if (interaction.options.getSubcommand() === `count`)
-      await interaction.reply({content: this.votesCountMessage(interaction.channel.id)});
-
-    if (interaction.options.getSubcommand() === `stop`) {
-      if (!this.FoFVotes[channel?.id || interaction.channel.id]?.startedAt)
-        return interaction.reply({content: `Nothing to stop`, ephemeral: true});
-
-      await this.stopFofVote(channel?.id || interaction.channel.id);
-      await interaction.reply({content: `Ok`, ephemeral: true});
-    }
-
-    
+      return this.voteCommand(interaction);
   }
 }
