@@ -56,7 +56,8 @@ export class FoF {
     const _startRepeatTimer = (minutes) =>
       RepeaterTimers[channel.id] =
         setTimeout(async () => {
-          await this.sendRowsToChannel(channel);
+          if (!isWeekend(new Date()))
+            await this.sendRowsToChannel(channel);
           if (RepeaterTimers[channel.id])
             _startRepeatTimer();
         }, minutes * 60 * 1000);
@@ -158,7 +159,7 @@ export class FoF {
     let days = interaction.options.getNumber(`days`);
     days = days === null && 1 || days;
 
-    if (days === 1) {
+    if (days === 1 && !isWeekend(new Date())) {
       const {average, total} = this.count(Object.values(ChannelVotes[interaction.channel.id]));
       return interaction.reply({content: AveragesToOutOf(average, total), ephemeral: true});
     }
